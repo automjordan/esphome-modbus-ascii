@@ -148,17 +148,17 @@ void ModbusAscii::set_override(bool on) {
   if (on) {
     ESP_LOGI(TAG, "Emulazione pannello ATTIVA");
     this->last_emul_ = 0;
-    this->send_panel_frame();
+    this->send_panel_frame(true);
   } else {
     ESP_LOGI(TAG, "Emulazione pannello disattivata: al prossimo broadcast comanda il tastierino");
   }
 }
 
-void ModbusAscii::send_panel_frame() {
+void ModbusAscii::send_panel_frame(bool force) {
   if (!this->override_ || !this->panel_seen_)
     return;
   const uint32_t now = millis();
-  if (now - this->last_emul_ < 300)
+  if (!force && (now - this->last_emul_) < 300)
     return;
   this->last_emul_ = now;
 

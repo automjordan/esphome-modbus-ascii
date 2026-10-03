@@ -68,7 +68,8 @@ class ModbusAscii : public PollingComponent, public uart::UARTDevice {
   bool get_override() const { return this->override_; }
   void set_desired_mode(uint8_t code) { this->desired_mode_ = code & 0x0F; this->has_mode_ = true; }
   void set_desired_setpoint(uint16_t v) { this->desired_sp_ = v; this->has_sp_ = true; }
-  void send_panel_frame();
+  // force=true salta il rate limit (comandi dell'utente).
+  void send_panel_frame(bool force = false);
 
  protected:
   struct Command {
