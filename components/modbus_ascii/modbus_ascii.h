@@ -58,15 +58,17 @@ class ModbusAscii : public PollingComponent, public uart::UARTDevice {
   // Ritorna false se il registro non e' mai stato letto.
   bool get_register(uint16_t reg, uint16_t &out) const;
 
-  // --- Override del pannello -----------------------------------
-  // Con override attivo, dopo ogni frame del pannello (broadcast
-  // FC16 o handshake) il master riscrive 224=64 e i valori desiderati,
-  // in modo che la scheda esegua i comandi di HA e non del CNV.
+  // --- Emulazione del pannello ----------------------------------
+  // La scheda esegue solo il broadcast FC16 sui registri 101-103
+  // inviato dal pannello. Con l'emulazione attiva, dopo ogni
+  // broadcast del pannello ne inviamo uno nostro con il codice
+  // modalita' (nibble basso del 101) e il setpoint (102) desiderati,
+  // lasciando invariati il byte alto del 101 e il registro 103.
   void set_override(bool on);
   bool get_override() const { return this->override_; }
-  void set_desired_prg(uint16_t v) { this->desired_prg_ = v; this->has_prg_ = true; }
+  void set_desired_mode(uint8_t code) { this->desired_mode_ = code & 0x0F; this->has_mode_ = true; }
   void set_desired_setpoint(uint16_t v) { this->desired_sp_ = v; this->has_sp_ = true; }
-  void reassert();
+  void send_panel_frame();
 
  protected:
   struct Command {
@@ -74,6 +76,7 @@ class ModbusAscii : public PollingComponent, public uart::UARTDevice {
     uint8_t func;
     uint16_t reg;
     uint16_t arg;  // qty per FC03, value per FC06
+    uint16_t v[3];  // valori per il broadcast FC16 (101..103)
   };
 
   void send_(const Command &c);
@@ -106,13 +109,15 @@ class ModbusAscii : public PollingComponent, public uart::UARTDevice {
   // cache degli ultimi valori letti (registro -> valore)
   std::vector<std::pair<uint16_t, uint16_t>> cache_;
 
-  // stato override
+  // stato emulazione pannello
   bool override_{false};
-  bool has_prg_{false};
+  bool has_mode_{false};
   bool has_sp_{false};
-  uint16_t desired_prg_{0};
+  uint8_t desired_mode_{0};
   uint16_t desired_sp_{0};
-  uint32_t last_reassert_{0};
+  bool panel_seen_{false};
+  uint16_t panel_[3]{0, 0, 0};  // ultimi 101, 102, 103 ricevuti dal pannello
+  uint32_t last_emul_{0};
 };
 
 }  // namespace modbus_ascii

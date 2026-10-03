@@ -117,7 +117,8 @@ void ModbusAscii::loop() {
     this->current_ = this->queue_.front();
     this->queue_.erase(this->queue_.begin());
     this->send_(this->current_);
-    this->waiting_ = true;
+    // broadcast (addr 0): nessuna risposta attesa
+    this->waiting_ = (this->current_.addr != 0x00);
     this->sent_at_ = now;
     this->last_send_ = now;
   }
@@ -145,32 +146,34 @@ void ModbusAscii::set_override(bool on) {
     return;
   this->override_ = on;
   if (on) {
-    ESP_LOGI(TAG, "Override ATTIVO: la scheda seguira' Home Assistant");
-    this->last_reassert_ = 0;
-    this->reassert();
+    ESP_LOGI(TAG, "Emulazione pannello ATTIVA");
+    this->last_emul_ = 0;
+    this->send_panel_frame();
   } else {
-    ESP_LOGI(TAG, "Override disattivato: restituisco il controllo al pannello (224=66)");
-    this->write_register(224, 66);
+    ESP_LOGI(TAG, "Emulazione pannello disattivata: al prossimo broadcast comanda il tastierino");
   }
 }
 
-void ModbusAscii::reassert() {
-  if (!this->override_)
+void ModbusAscii::send_panel_frame() {
+  if (!this->override_ || !this->panel_seen_)
     return;
   const uint32_t now = millis();
-  if (now - this->last_reassert_ < 800)
+  if (now - this->last_emul_ < 300)
     return;
-  this->last_reassert_ = now;
-  // write_register inserisce in testa: inserisco in ordine inverso
-  // per ottenere sul bus 224 -> PRG -> setpoint.
-  if (this->has_sp_)
-    this->write_register(231, this->desired_sp_);
-  if (this->has_prg_)
-    this->write_register(201, this->desired_prg_);
-  this->write_register(224, 64);
-  ESP_LOGD(TAG, "Override: riassegno 224=64, PRG=%s, SP=%s",
-           this->has_prg_ ? std::to_string(this->desired_prg_).c_str() : "-",
-           this->has_sp_ ? std::to_string(this->desired_sp_).c_str() : "-");
+  this->last_emul_ = now;
+
+  Command cmd{};
+  cmd.addr = 0x00;  // broadcast
+  cmd.func = 0x10;
+  cmd.reg = 101;
+  cmd.arg = 3;
+  cmd.v[0] = this->has_mode_ ? (uint16_t) ((this->panel_[0] & 0xFFF0) | this->desired_mode_)
+                             : this->panel_[0];
+  cmd.v[1] = this->has_sp_ ? this->desired_sp_ : this->panel_[1];
+  cmd.v[2] = this->panel_[2];
+
+  ESP_LOGD(TAG, "Emulazione: broadcast 101=0x%04X 102=%u 103=%u", cmd.v[0], cmd.v[1], cmd.v[2]);
+  this->queue_.insert(this->queue_.begin(), cmd);
 }
 
 bool ModbusAscii::get_register(uint16_t reg, uint16_t &out) const {
@@ -188,26 +191,41 @@ bool ModbusAscii::get_register(uint16_t reg, uint16_t &out) const {
 // ------------------------------------------------------------------
 
 void ModbusAscii::send_(const Command &c) {
-  const uint8_t payload[6] = {
-      c.addr, c.func, (uint8_t) (c.reg >> 8), (uint8_t) (c.reg & 0xFF),
-      (uint8_t) (c.arg >> 8), (uint8_t) (c.arg & 0xFF)};
+  std::vector<uint8_t> payload;
+  if (c.func == 0x10) {
+    payload = {c.addr, 0x10, (uint8_t) (c.reg >> 8), (uint8_t) (c.reg & 0xFF),
+               (uint8_t) (c.arg >> 8), (uint8_t) (c.arg & 0xFF), (uint8_t) (c.arg * 2)};
+    for (uint16_t i = 0; i < c.arg && i < 3; i++) {
+      payload.push_back((uint8_t) (c.v[i] >> 8));
+      payload.push_back((uint8_t) (c.v[i] & 0xFF));
+    }
+  } else {
+    payload = {c.addr, c.func, (uint8_t) (c.reg >> 8), (uint8_t) (c.reg & 0xFF),
+               (uint8_t) (c.arg >> 8), (uint8_t) (c.arg & 0xFF)};
+  }
 
   uint8_t lrc = 0;
   for (uint8_t b : payload)
     lrc = (uint8_t) (lrc + b);
   lrc = (uint8_t) (-((int8_t) lrc));
 
-  char frame[20];
-  snprintf(frame, sizeof(frame), ":%02X%02X%02X%02X%02X%02X%02X\r\n", payload[0], payload[1],
-           payload[2], payload[3], payload[4], payload[5], lrc);
+  std::string frame = ":";
+  char hx[3];
+  for (uint8_t b : payload) {
+    snprintf(hx, sizeof(hx), "%02X", b);
+    frame += hx;
+  }
+  snprintf(hx, sizeof(hx), "%02X", lrc);
+  frame += hx;
+  frame += "\r\n";
 
-  ESP_LOGV(TAG, "TX %s", frame);
+  ESP_LOGV(TAG, "TX %s", frame.c_str());
 
   if (this->flow_control_pin_ != nullptr)
     this->flow_control_pin_->digital_write(true);
 
-  this->write_str(frame);
-  this->flush();  // attende lo svuotamento del FIFO hardware
+  this->write_str(frame.c_str());
+  this->flush();
 
   if (this->flow_control_pin_ != nullptr)
     this->flow_control_pin_->digital_write(false);
@@ -320,8 +338,13 @@ void ModbusAscii::handle_foreign_frame_(const std::vector<uint8_t> &f) {
     for (uint16_t i = 0; i < qty && (size_t) (8 + i * 2) < n; i++) {
       const uint16_t value = (uint16_t) ((f[7 + i * 2] << 8) | f[8 + i * 2]);
       this->publish_register_((uint16_t) (start + i), value);
+      if (start == 101 && i < 3)
+        this->panel_[i] = value;
     }
-    this->reassert();
+    if (start == 101 && qty >= 3) {
+      this->panel_seen_ = true;
+      this->send_panel_frame();
+    }
     return;
   }
 
@@ -352,12 +375,9 @@ void ModbusAscii::handle_foreign_frame_(const std::vector<uint8_t> &f) {
     }
   }
 
-  // Handshake proprietario del pannello (addr 0x77 / func 0xFF):
-  // anche questo puo' riportare 224 a 66, quindi riassegno.
-  if (addr == 0x77) {
-    this->reassert();
+  // Handshake proprietario del pannello (addr 0x77 / func 0xFF): ignorato.
+  if (addr == 0x77)
     return;
-  }
 
   ESP_LOGV(TAG, "Frame altrui ignorata: addr=%u func=%02X", addr, func);
 }
