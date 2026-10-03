@@ -58,6 +58,16 @@ class ModbusAscii : public PollingComponent, public uart::UARTDevice {
   // Ritorna false se il registro non e' mai stato letto.
   bool get_register(uint16_t reg, uint16_t &out) const;
 
+  // --- Override del pannello -----------------------------------
+  // Con override attivo, dopo ogni frame del pannello (broadcast
+  // FC16 o handshake) il master riscrive 224=64 e i valori desiderati,
+  // in modo che la scheda esegua i comandi di HA e non del CNV.
+  void set_override(bool on);
+  bool get_override() const { return this->override_; }
+  void set_desired_prg(uint16_t v) { this->desired_prg_ = v; this->has_prg_ = true; }
+  void set_desired_setpoint(uint16_t v) { this->desired_sp_ = v; this->has_sp_ = true; }
+  void reassert();
+
  protected:
   struct Command {
     uint8_t addr;
@@ -95,6 +105,14 @@ class ModbusAscii : public PollingComponent, public uart::UARTDevice {
 
   // cache degli ultimi valori letti (registro -> valore)
   std::vector<std::pair<uint16_t, uint16_t>> cache_;
+
+  // stato override
+  bool override_{false};
+  bool has_prg_{false};
+  bool has_sp_{false};
+  uint16_t desired_prg_{0};
+  uint16_t desired_sp_{0};
+  uint32_t last_reassert_{0};
 };
 
 }  // namespace modbus_ascii

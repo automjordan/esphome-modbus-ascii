@@ -140,6 +140,39 @@ void ModbusAscii::probe(uint8_t addr, uint16_t reg) {
   this->queue_.push_back(Command{addr, 0x03, reg, 1});
 }
 
+void ModbusAscii::set_override(bool on) {
+  if (this->override_ == on)
+    return;
+  this->override_ = on;
+  if (on) {
+    ESP_LOGI(TAG, "Override ATTIVO: la scheda seguira' Home Assistant");
+    this->last_reassert_ = 0;
+    this->reassert();
+  } else {
+    ESP_LOGI(TAG, "Override disattivato: restituisco il controllo al pannello (224=66)");
+    this->write_register(224, 66);
+  }
+}
+
+void ModbusAscii::reassert() {
+  if (!this->override_)
+    return;
+  const uint32_t now = millis();
+  if (now - this->last_reassert_ < 800)
+    return;
+  this->last_reassert_ = now;
+  // write_register inserisce in testa: inserisco in ordine inverso
+  // per ottenere sul bus 224 -> PRG -> setpoint.
+  if (this->has_sp_)
+    this->write_register(231, this->desired_sp_);
+  if (this->has_prg_)
+    this->write_register(201, this->desired_prg_);
+  this->write_register(224, 64);
+  ESP_LOGD(TAG, "Override: riassegno 224=64, PRG=%s, SP=%s",
+           this->has_prg_ ? std::to_string(this->desired_prg_).c_str() : "-",
+           this->has_sp_ ? std::to_string(this->desired_sp_).c_str() : "-");
+}
+
 bool ModbusAscii::get_register(uint16_t reg, uint16_t &out) const {
   for (const auto &p : this->cache_) {
     if (p.first == reg) {
@@ -288,6 +321,7 @@ void ModbusAscii::handle_foreign_frame_(const std::vector<uint8_t> &f) {
       const uint16_t value = (uint16_t) ((f[7 + i * 2] << 8) | f[8 + i * 2]);
       this->publish_register_((uint16_t) (start + i), value);
     }
+    this->reassert();
     return;
   }
 
@@ -318,7 +352,13 @@ void ModbusAscii::handle_foreign_frame_(const std::vector<uint8_t> &f) {
     }
   }
 
-  // Tutto il resto (es. handshake 77/FF del pannello) viene ignorato.
+  // Handshake proprietario del pannello (addr 0x77 / func 0xFF):
+  // anche questo puo' riportare 224 a 66, quindi riassegno.
+  if (addr == 0x77) {
+    this->reassert();
+    return;
+  }
+
   ESP_LOGV(TAG, "Frame altrui ignorata: addr=%u func=%02X", addr, func);
 }
 
