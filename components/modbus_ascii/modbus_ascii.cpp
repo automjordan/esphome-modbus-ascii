@@ -50,8 +50,8 @@ void ModbusAscii::dump_config() {
 }
 
 void ModbusAscii::update() {
-  // Accoda una lettura per ogni sensore attivo. Registri contigui
-  // vengono raggruppati in un'unica richiesta.
+  // Una richiesta per registro: il firmware INN-FR-B40 supporta FC03
+  // solo con quantita' 1 e restituisce dati disallineati con qty > 1.
   std::vector<uint16_t> regs;
   for (auto *s : this->sensors_) {
     if (!s->is_passive())
@@ -62,18 +62,8 @@ void ModbusAscii::update() {
   std::sort(regs.begin(), regs.end());
   regs.erase(std::unique(regs.begin(), regs.end()), regs.end());
 
-  uint16_t start = regs[0];
-  uint16_t qty = 1;
-  for (size_t i = 1; i < regs.size(); i++) {
-    if (regs[i] == start + qty && qty < 16) {
-      qty++;
-    } else {
-      this->read_registers(start, qty);
-      start = regs[i];
-      qty = 1;
-    }
-  }
-  this->read_registers(start, qty);
+  for (uint16_t r : regs)
+    this->read_registers(r, 1);
 }
 
 void ModbusAscii::loop() {
