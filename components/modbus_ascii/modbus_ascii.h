@@ -50,6 +50,9 @@ class ModbusAscii : public PollingComponent, public uart::UARTDevice {
   void write_register(uint16_t reg, uint16_t value);
   // Lettura di `qty` registri da `reg` (FC03), accodata.
   void read_registers(uint16_t reg, uint16_t qty);
+  // Sonda FC03 verso un indirizzo arbitrario: il risultato viene solo
+  // loggato a livello INFO, non pubblicato sui sensori.
+  void probe(uint8_t addr, uint16_t reg);
 
   // Ultimo valore noto di un registro, per read-modify-write.
   // Ritorna false se il registro non e' mai stato letto.
@@ -57,6 +60,7 @@ class ModbusAscii : public PollingComponent, public uart::UARTDevice {
 
  protected:
   struct Command {
+    uint8_t addr;
     uint8_t func;
     uint16_t reg;
     uint16_t arg;  // qty per FC03, value per FC06

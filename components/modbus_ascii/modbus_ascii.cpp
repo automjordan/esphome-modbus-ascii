@@ -104,7 +104,11 @@ void ModbusAscii::loop() {
   const uint32_t now = millis();
 
   if (this->waiting_ && (now - this->sent_at_) > this->timeout_ms_) {
-    ESP_LOGW(TAG, "Timeout: func=%02X reg=%u", this->current_.func, this->current_.reg);
+    if (this->current_.addr == this->address_) {
+      ESP_LOGW(TAG, "Timeout: func=%02X reg=%u", this->current_.func, this->current_.reg);
+    } else {
+      ESP_LOGV(TAG, "Sonda addr=%u: nessuna risposta", this->current_.addr);
+    }
     this->waiting_ = false;
   }
 
@@ -125,11 +129,15 @@ void ModbusAscii::loop() {
 
 void ModbusAscii::write_register(uint16_t reg, uint16_t value) {
   // Le scritture passano davanti alle letture in coda.
-  this->queue_.insert(this->queue_.begin(), Command{0x06, reg, value});
+  this->queue_.insert(this->queue_.begin(), Command{this->address_, 0x06, reg, value});
 }
 
 void ModbusAscii::read_registers(uint16_t reg, uint16_t qty) {
-  this->queue_.push_back(Command{0x03, reg, qty});
+  this->queue_.push_back(Command{this->address_, 0x03, reg, qty});
+}
+
+void ModbusAscii::probe(uint8_t addr, uint16_t reg) {
+  this->queue_.push_back(Command{addr, 0x03, reg, 1});
 }
 
 bool ModbusAscii::get_register(uint16_t reg, uint16_t &out) const {
@@ -148,7 +156,7 @@ bool ModbusAscii::get_register(uint16_t reg, uint16_t &out) const {
 
 void ModbusAscii::send_(const Command &c) {
   const uint8_t payload[6] = {
-      this->address_, c.func, (uint8_t) (c.reg >> 8), (uint8_t) (c.reg & 0xFF),
+      c.addr, c.func, (uint8_t) (c.reg >> 8), (uint8_t) (c.reg & 0xFF),
       (uint8_t) (c.arg >> 8), (uint8_t) (c.arg & 0xFF)};
 
   uint8_t lrc = 0;
@@ -214,7 +222,7 @@ void ModbusAscii::handle_frame_(const std::vector<uint8_t> &f) {
 
   // Risposta a una nostra richiesta: stesso indirizzo, stessa funzione
   // (o eccezione), e struttura da risposta e non da richiesta.
-  if (this->waiting_ && addr == this->address_) {
+  if (this->waiting_ && addr == this->current_.addr) {
     const bool is_exception = (func == (this->current_.func | 0x80));
     const bool is_read_resp =
         (func == 0x03 && this->current_.func == 0x03 && n > 3 && f[2] == (uint8_t) (n - 3));
@@ -235,8 +243,13 @@ void ModbusAscii::handle_own_response_(const std::vector<uint8_t> &f) {
   this->waiting_ = false;
 
   if (func & 0x80) {
-    ESP_LOGW(TAG, "Eccezione %02X su func=%02X reg=%u", n > 2 ? f[2] : 0, this->current_.func,
-             this->current_.reg);
+    if (this->current_.addr != this->address_) {
+      ESP_LOGI(TAG, "*** SONDA addr=%u (0x%02X): eccezione %02X (il dispositivo esiste!)",
+               this->current_.addr, this->current_.addr, n > 2 ? f[2] : 0);
+    } else {
+      ESP_LOGW(TAG, "Eccezione %02X su func=%02X reg=%u", n > 2 ? f[2] : 0, this->current_.func,
+               this->current_.reg);
+    }
     return;
   }
 
@@ -244,7 +257,12 @@ void ModbusAscii::handle_own_response_(const std::vector<uint8_t> &f) {
     const uint16_t count = f[2] / 2;
     for (uint16_t i = 0; i < count; i++) {
       const uint16_t value = (uint16_t) ((f[3 + i * 2] << 8) | f[4 + i * 2]);
-      this->publish_register_((uint16_t) (this->current_.reg + i), value);
+      if (this->current_.addr != this->address_) {
+        ESP_LOGI(TAG, "*** SONDA addr=%u (0x%02X) reg=%u -> %u", this->current_.addr,
+                 this->current_.addr, (unsigned) (this->current_.reg + i), value);
+      } else {
+        this->publish_register_((uint16_t) (this->current_.reg + i), value);
+      }
     }
     return;
   }
