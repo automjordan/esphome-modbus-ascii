@@ -1,6 +1,6 @@
 # esphome-modbus-ascii
 
-Componente ESPHome **Modbus ASCII master** e integrazione completa in Home Assistant
+[questa guida è stata scritta dall'AI]Componente ESPHome **Modbus ASCII master** e integrazione completa in Home Assistant
 del recuperatore di calore **Giacomini KHR-V** (elettronica Innova/Riello **INN-FR-B40**,
 pannello a muro **CNV**) — **mantenendo il tastierino a muro collegato e funzionante**.
 
