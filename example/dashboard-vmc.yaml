@@ -79,8 +79,10 @@ hold_action:
                 name: Temperatura T3
               - entity: select.vmc_khrv_stagionale
                 name: Stagionale
-              - entity: sensor.vmc_khrv_ore_lavoro_ventilatore
-                name: Ore lavoro
+              - entity: sensor.lavanderia_vmc_khr_v_ore_filtri
+                name: Ore filtri
+              - entity: button.lavanderia_vmc_khr_v_filtri_sostituiti
+                name: Filtri sostituiti
 
           - type: conditional
             conditions:
@@ -92,11 +94,15 @@ hold_action:
                   - condition: state
                     entity: binary_sensor.vmc_khrv_filtri_sporchi
                     state: "on"
+                  - condition: state
+                    entity: binary_sensor.lavanderia_vmc_khr_v_cambio_filtri
+                    state: "on"
             card:
               type: entities
               title: Allarmi
               state_color: true
               entities:
+                - binary_sensor.lavanderia_vmc_khr_v_cambio_filtri
                 - binary_sensor.vmc_khrv_filtri_sporchi
                 - binary_sensor.vmc_khrv_guasto_motore
                 - binary_sensor.vmc_khrv_allarme_sonda_aria

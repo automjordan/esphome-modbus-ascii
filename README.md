@@ -1,6 +1,6 @@
 # esphome-modbus-ascii
 
-QUESTA GUIDA é STATA SCRITTA DALL'AI : Componente ESPHome **Modbus ASCII master** e integrazione completa in Home Assistant
+Componente ESPHome **Modbus ASCII master** e integrazione completa in Home Assistant
 del recuperatore di calore **Giacomini KHR-V** (elettronica Innova/Riello **INN-FR-B40**,
 pannello a muro **CNV**) — **mantenendo il tastierino a muro collegato e funzionante**.
 
@@ -203,6 +203,16 @@ Logica di convivenza con il tastierino, tutta nel firmware (`example/vmc-khrv.ya
 
 - un comando da HA (velocità o setpoint) **accende** il controllo HA;
 - un tasto premuto sul tastierino **spegne** il controllo HA e il pannello riprende.
+
+### Contatore filtri
+
+Il contatore ore della scheda (reg 222) resta a zero finché `ACL` (reg 221) vale 0.
+L'esempio conta nel firmware le ore con motore acceso (una scrittura in flash all'ora),
+espone `Ore filtri`, una soglia configurabile (`Intervallo cambio filtri`, default 8760 h),
+l'allarme `Cambio filtri` con notifica persistente in HA e il bottone `Filtri sostituiti`.
+Serve abilitare "Consenti al dispositivo di eseguire azioni di Home Assistant" nelle
+opzioni dell'integrazione ESPHome. In alternativa, scrivendo 8760 nel reg 221 è la scheda
+stessa a contare e a segnalare "Filtri sporchi" anche sul tastierino.
 
 ## Cose che NON funzionano (e perché)
 

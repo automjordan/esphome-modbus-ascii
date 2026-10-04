@@ -23,6 +23,27 @@ globals:
   - id: last_panel_code
     type: int
     initial_value: "-1"
+  # Contatore filtri: minuti in RAM, ore persistite in flash
+  - id: filter_minutes
+    type: int
+    initial_value: "0"
+  - id: filter_hours
+    type: int
+    restore_value: true
+    initial_value: "0"
+
+# Conta le ore con il motore acceso (una scrittura in flash all'ora)
+interval:
+  - interval: 60s
+    then:
+      - lambda: |-
+          if (id(motor_speed).has_state() && id(motor_speed).state > 0) {
+            id(filter_minutes) += 1;
+            if (id(filter_minutes) >= 60) {
+              id(filter_minutes) = 0;
+              id(filter_hours) += 1;
+            }
+          }
 
 # ---------------------------------------------------------------
 # Giacomini KHR-V (scheda INN-FR-B40) su Modbus ASCII 9600 7E1.
@@ -38,6 +59,11 @@ globals:
 # Logica di convivenza con il tastierino (tutta nel firmware):
 #   - un comando da HA (velocita o setpoint) accende il controllo HA
 #   - un tasto premuto sul tastierino spegne il controllo HA
+#
+# Contatore filtri nel firmware: il contatore della scheda (reg 222)
+# resta a zero finche' ACL (reg 221) e' 0. Qui si contano le ore con
+# motore acceso; oltre la soglia scatta "Cambio filtri" e una notifica
+# in HA (richiede "Consenti azioni HA" nell'integrazione ESPHome).
 #
 # A e B sono attualmente invertiti sulla Waveshare: le due
 # "inverted: true" compensano. Scambiando i fili vanno rimosse.
@@ -140,6 +166,17 @@ sensor:
     unit_of_measurement: "h"
     state_class: total_increasing
     accuracy_decimals: 0
+    entity_category: diagnostic
+
+  - platform: template
+    name: "Ore filtri"
+    id: filter_hours_sensor
+    icon: mdi:air-filter
+    unit_of_measurement: "h"
+    state_class: total_increasing
+    accuracy_decimals: 0
+    update_interval: 60s
+    lambda: 'return id(filter_hours);'
 
   - platform: modbus_ascii
     modbus_ascii_id: vmc
@@ -324,6 +361,21 @@ binary_sensor:
     lambda: 'return ((uint16_t) id(stat_raw).state) & 0x0020;'
     device_class: problem
 
+  - platform: template
+    name: "Cambio filtri"
+    id: filter_due
+    device_class: problem
+    icon: mdi:air-filter
+    lambda: 'return id(filter_hours) >= (int) id(filter_interval).state;'
+    on_press:
+      then:
+        - homeassistant.service:
+            service: persistent_notification.create
+            data:
+              notification_id: vmc_filtri
+              title: "VMC: cambio filtri"
+              message: "La VMC ha superato le ore previste. Dopo la sostituzione premi 'Filtri sostituiti'."
+
 # ---------------------------------------------------------------
 # Comandi
 # ---------------------------------------------------------------
@@ -398,3 +450,32 @@ number:
           id(vmc).set_desired_setpoint(v);
           id(vmc_override).turn_on();
           id(vmc).send_panel_frame(true);
+
+  - platform: template
+    name: "Intervallo cambio filtri"
+    id: filter_interval
+    icon: mdi:calendar-clock
+    min_value: 1000
+    max_value: 20000
+    step: 100
+    unit_of_measurement: "h"
+    optimistic: true
+    restore_value: true
+    initial_value: 8760
+    entity_category: config
+
+button:
+  - platform: template
+    name: "Filtri sostituiti"
+    icon: mdi:air-filter
+    entity_category: config
+    on_press:
+      - lambda: |-
+          id(filter_hours) = 0;
+          id(filter_minutes) = 0;
+          id(vmc).write_register(222, 0);
+          ESP_LOGI("HA", "Filtri sostituiti: contatore azzerato");
+      - homeassistant.service:
+          service: persistent_notification.dismiss
+          data:
+            notification_id: vmc_filtri
