@@ -1,0 +1,139 @@
+# ===============================================================
+# Tile VMC (Mushroom) - tap: cicla la velocita, hold: popup
+# Richiede HACS: mushroom, browser_mod, scheduler-component + scheduler-card
+# Adattare gli entity_id a quelli generati dalla propria installazione.
+# ===============================================================
+type: custom:mushroom-template-card
+entity: select.lavanderia_vmc_khr_v_velocita_ventilazione
+primary: VMC
+secondary: >-
+  {{ states('sensor.lavanderia_vmc_khr_v_velocita_ventilatore') }} % ·
+  {{ states('select.lavanderia_vmc_khr_v_velocita_ventilazione') }}
+  {% if is_state('switch.lavanderia_vmc_khr_v_controllo_da_home_assistant', 'on') %}· HA{% else %}· tastierino{% endif %}
+icon: mdi:fan
+icon_color: >-
+  {% if is_state('binary_sensor.vmc_khrv_allarme_presente', 'on') %}red
+  {% elif is_state('switch.lavanderia_vmc_khr_v_controllo_da_home_assistant', 'on') %}blue
+  {% else %}grey{% endif %}
+badge_icon: >-
+  {% if is_state('binary_sensor.vmc_khrv_filtri_sporchi', 'on') %}mdi:air-filter{% endif %}
+badge_color: orange
+tap_action:
+  action: call-service
+  service: select.select_next
+  target:
+    entity_id: select.lavanderia_vmc_khr_v_velocita_ventilazione
+  data:
+    cycle: true
+hold_action:
+  action: fire-dom-event
+  browser_mod:
+    service: browser_mod.popup
+    data:
+      title: VMC KHR-V
+      size: wide
+      content:
+        type: vertical-stack
+        cards:
+
+          - type: custom:mushroom-chips-card
+            alignment: center
+            chips:
+              - type: entity
+                entity: switch.lavanderia_vmc_khr_v_controllo_da_home_assistant
+                name: Controllo HA
+                icon: mdi:home-assistant
+                tap_action:
+                  action: toggle
+              - type: template
+                entity: sensor.lavanderia_vmc_khr_v_velocita_richiesta_dal_tastierino
+                icon: mdi:remote
+                content: "Tastierino: {{ states('sensor.lavanderia_vmc_khr_v_velocita_richiesta_dal_tastierino') }}"
+
+          - type: custom:mushroom-select-card
+            entity: select.lavanderia_vmc_khr_v_velocita_ventilazione
+            name: Velocità ventilazione
+            icon: mdi:fan
+            layout: horizontal
+
+          - type: custom:mushroom-number-card
+            entity: number.vmc_khrv_setpoint
+            name: Setpoint
+            icon: mdi:thermometer
+            display_mode: buttons
+            layout: horizontal
+
+          - type: entities
+            title: Stato
+            state_color: true
+            entities:
+              - entity: sensor.lavanderia_vmc_khr_v_velocita_ventilatore
+                name: Velocità motore reale
+              - entity: sensor.lavanderia_vmc_khr_v_setpoint_attivo
+                name: Setpoint attivo
+              - entity: sensor.lavanderia_vmc_khr_v_temperatura_aria
+                name: Temperatura aria
+              - entity: sensor.lavanderia_vmc_khr_v_temperatura_t2
+                name: Temperatura T2
+              - entity: sensor.lavanderia_vmc_khr_v_temperatura_t3
+                name: Temperatura T3
+              - entity: select.vmc_khrv_stagionale
+                name: Stagionale
+              - entity: sensor.vmc_khrv_ore_lavoro_ventilatore
+                name: Ore lavoro
+
+          - type: conditional
+            conditions:
+              - condition: or
+                conditions:
+                  - condition: state
+                    entity: binary_sensor.vmc_khrv_allarme_presente
+                    state: "on"
+                  - condition: state
+                    entity: binary_sensor.vmc_khrv_filtri_sporchi
+                    state: "on"
+            card:
+              type: entities
+              title: Allarmi
+              state_color: true
+              entities:
+                - binary_sensor.vmc_khrv_filtri_sporchi
+                - binary_sensor.vmc_khrv_guasto_motore
+                - binary_sensor.vmc_khrv_allarme_sonda_aria
+                - binary_sensor.lavanderia_vmc_khr_v_allarme_comunicazione
+                - binary_sensor.vmc_khrv_antigelo_attivo
+
+          # Programmazione: creare le voci con la scheda "Schema" (fasce orarie)
+          # cosi' ogni riga mostra "08:00 - 20:00" invece della sola ora di avvio.
+          - type: custom:scheduler-card
+            title: Programmazione
+            include:
+              - select.lavanderia_vmc_khr_v_velocita_ventilazione
+            customize:
+              select.lavanderia_vmc_khr_v_velocita_ventilazione:
+                name: Velocità VMC
+                icon: mdi:fan
+            display_options:
+              primary_info: "{action}"
+              secondary_info:
+                - days
+                - time
+            time_step: 15
+            show_header_toggle: false
+            discover_existing: false
+            tags:
+              - vmc
+
+          # Cronologia: barre colorate per chi comandava e cosa, linea per il motore.
+          - type: history-graph
+            title: Ultime 24 ore
+            hours_to_show: 24
+            entities:
+              - entity: sensor.lavanderia_vmc_khr_v_velocita_richiesta_dal_tastierino
+                name: Tastierino
+              - entity: select.lavanderia_vmc_khr_v_velocita_ventilazione
+                name: Home Assistant
+              - entity: switch.lavanderia_vmc_khr_v_controllo_da_home_assistant
+                name: Controllo HA
+              - entity: sensor.lavanderia_vmc_khr_v_velocita_ventilatore
+                name: Motore %

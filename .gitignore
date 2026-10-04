@@ -1,0 +1,9 @@
+# Manuali del costruttore: uso personale, divieto di riproduzione
+docs/manuali-costruttore/
+# ESPHome / editor
+.esphome/
+secrets.yaml
+*.pyc
+__pycache__/
+.DS_Store
+Thumbs.db
